@@ -35,6 +35,9 @@ func BenchmarkCprpcJSON(b *testing.B) {
 	go srv.Accept(l)
 
 	client, err := cprpc.Dial("tcp4", l.Addr().String())
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer client.Close()
 	b.StartTimer()
 	args := &HelloV1API{
