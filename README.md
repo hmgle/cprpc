@@ -56,7 +56,7 @@ import (
 )
 
 func main() {
-	clietn, err := cprpc.Dial("tcp4", "127.0.0.1:1234")
+	client, err := cprpc.Dial("tcp4", "127.0.0.1:1234")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func main() {
 		Name: "world",
 	}
 	reply := &HelloV1Ret{}
-	err = clietn.Call("/v1/hello", args, &reply)
+	err = client.Call("/v1/hello", args, &reply)
 	if err != nil {
 		log.Fatal(err)
 	}
