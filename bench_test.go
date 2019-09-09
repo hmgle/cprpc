@@ -23,7 +23,7 @@ func (h *HelloV1API) Serve(ctx *cprpc.Context) {
 	})
 }
 
-func BenchmarkCprpcJSON(b *testing.B) {
+func BenchmarkCprpc(b *testing.B) {
 	b.StopTimer()
 	srv := cprpc.NewServer()
 	srv.RegisterAPI("/v1/hello", &HelloV1API{})

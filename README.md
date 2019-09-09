@@ -2,17 +2,6 @@
 
 `cprpc` is a RPC package that copied and modified from the standard package of `net/rpc`, provides an easier way to use:
 
-```go
-type (
-	HelloV1API struct {
-		Name string
-	}
-	HelloV1Ret struct {
-		Data string
-	}
-)
-```
-
 Server:
 
 ```go
@@ -25,6 +14,14 @@ import (
 	"github.com/hmgle/cprpc"
 )
 
+type (
+	HelloV1API struct {
+		Name string
+	}
+	HelloV1Ret struct {
+		Data string
+	}
+)
 
 func (h *HelloV1API) Serve(ctx *cprpc.Context) {
 	ctx.ReplyOk(&HelloV1Ret{
