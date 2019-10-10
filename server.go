@@ -65,10 +65,11 @@ func NewServer() *Server {
 var DefaultServer = NewServer()
 
 type Context struct {
-	conn  *Server
-	seq   uint64
-	req   *Request
-	codec ServerCodec
+	conn    *Server
+	seq     uint64
+	req     *Request
+	codec   ServerCodec
+	sending *sync.Mutex
 }
 
 type API interface {
@@ -103,8 +104,7 @@ func (server *Server) sendResponse(sending *sync.Mutex, req *Request, reply inte
 }
 
 func (ctx *Context) ReplyOk(ret interface{}) {
-	sending := new(sync.Mutex)
-	ctx.conn.sendResponse(sending, ctx.req, ret, ctx.codec, "")
+	ctx.conn.sendResponse(ctx.sending, ctx.req, ret, ctx.codec, "")
 	ctx.conn.freeRequest(ctx.req)
 }
 
@@ -193,10 +193,11 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 		wg.Add(1)
 		go func() {
 			api.Serve(&Context{
-				conn:  server,
-				seq:   req.Seq,
-				req:   req,
-				codec: codec,
+				conn:    server,
+				seq:     req.Seq,
+				req:     req,
+				codec:   codec,
+				sending: sending,
 			})
 			wg.Done()
 		}()
@@ -224,10 +225,11 @@ func (server *Server) ServeRequest(codec ServerCodec) error {
 		return err
 	}
 	api.Serve(&Context{
-		conn:  server,
-		seq:   req.Seq,
-		req:   req,
-		codec: codec,
+		conn:    server,
+		seq:     req.Seq,
+		req:     req,
+		codec:   codec,
+		sending: sending,
 	})
 	return nil
 }
