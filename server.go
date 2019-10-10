@@ -191,12 +191,15 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 			continue
 		}
 		wg.Add(1)
-		go api.Serve(&Context{
-			conn:  server,
-			seq:   req.Seq,
-			req:   req,
-			codec: codec,
-		})
+		go func() {
+			api.Serve(&Context{
+				conn:  server,
+				seq:   req.Seq,
+				req:   req,
+				codec: codec,
+			})
+			wg.Done()
+		}()
 	}
 	// We've seen that there are no more requests.
 	// Wait for responses to be sent before closing codec.
