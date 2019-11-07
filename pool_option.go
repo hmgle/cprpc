@@ -1,3 +1,9 @@
+// cprpc pool is modify from flyaways/pool.v1 (https://github.com/flyaways/pool)
+
+// Original work Copyright 2016 flyaways
+// Modified work Copyright 2019 Hmgle (dustgle@gmail.com)
+// All rights reserved.
+
 package cprpc
 
 import (
@@ -18,15 +24,15 @@ func init() {
 	rand.NewSource(time.Now().UnixNano())
 }
 
-//Options pool options
+// Options pool options
 type Options struct {
 	lock sync.RWMutex
-	//targets node
+	// targets node
 	targets *[]string
-	//targets channel
+	// targets channel
 	input chan *[]string
 
-	//InitTargets init targets
+	// InitTargets init targets
 	InitTargets []string
 	// init connection
 	InitCap int
@@ -38,7 +44,7 @@ type Options struct {
 	WriteTimeout time.Duration
 }
 
-// Input is the input channel
+// Input is the input channel.
 func (o *Options) Input() chan<- *[]string {
 	return o.input
 }

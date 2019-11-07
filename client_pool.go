@@ -1,3 +1,9 @@
+// cprpc pool is modify from flyaways/pool.v1 (https://github.com/flyaways/pool)
+
+// Original work Copyright 2016 flyaways
+// Modified work Copyright 2019 Hmgle (dustgle@gmail.com)
+// All rights reserved.
+
 package cprpc
 
 import (
