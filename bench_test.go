@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/hmgle/cprpc"
 )
@@ -46,6 +47,46 @@ func BenchmarkCprpc(b *testing.B) {
 	reply := &HelloV1Ret{}
 	for i := 0; i < b.N; i++ {
 		client.Call("/v1/hello", &args, reply)
+	}
+	b.StopTimer()
+}
+
+func BenchmarkCprpcPool(b *testing.B) {
+	b.StopTimer()
+	srv := cprpc.NewServer()
+	srv.RegisterAPI("/v1/hello", &HelloV1API{})
+
+	l, err := net.Listen("tcp4", "")
+	if err != nil {
+		log.Fatal(err)
+	}
+	go srv.Accept(l)
+
+	options := &cprpc.Options{
+		InitTargets:  []string{l.Addr().String()},
+		InitCap:      5,
+		MaxCap:       30,
+		DialTimeout:  time.Second * 5,
+		IdleTimeout:  time.Second * 60,
+		ReadTimeout:  time.Second * 5,
+		WriteTimeout: time.Second * 5,
+	}
+
+	clientPool, err := cprpc.NewRPCPool(options)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	b.StartTimer()
+	args := &HelloV1API{
+		Name: "world",
+	}
+	reply := &HelloV1Ret{}
+	for i := 0; i < b.N; i++ {
+		err = clientPool.Call("/v1/hello", &args, reply)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	b.StopTimer()
 }
