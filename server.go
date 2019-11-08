@@ -449,6 +449,17 @@ func (s *Server) closeListenersLocked() error {
 	return err
 }
 
+func (s *Server) trackConnUnlock(rc *rpcConn, add bool) {
+	if s.activeConn == nil {
+		s.activeConn = make(map[*rpcConn]struct{})
+	}
+	if add {
+		s.activeConn[rc] = struct{}{}
+	} else {
+		delete(s.activeConn, rc)
+	}
+}
+
 func (s *Server) trackConn(rc *rpcConn, add bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -492,7 +503,7 @@ func (s *Server) closeIdleConns() bool {
 	for rc := range s.activeConn {
 		if rc.numReq() == 0 {
 			rc.rwc.Close()
-			s.trackConn(rc, false)
+			s.trackConnUnlock(rc, false)
 		} else {
 			quiescent = false
 		}
