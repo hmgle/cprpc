@@ -33,7 +33,7 @@ func BenchmarkCprpc(b *testing.B) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	go srv.Accept(l)
+	go srv.Serve(l)
 
 	client, err := cprpc.Dial("tcp4", l.Addr().String())
 	if err != nil {
@@ -60,7 +60,7 @@ func BenchmarkCprpcPool(b *testing.B) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	go srv.Accept(l)
+	go srv.Serve(l)
 
 	options := &cprpc.Options{
 		InitTargets:  []string{l.Addr().String()},
