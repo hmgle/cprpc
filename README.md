@@ -37,7 +37,7 @@ func main() {
 	if err != nil {
 		log.Fatal("ListenTCP error:", err)
 	}
-	srv.Accept(listener)
+	srv.Serve(listener)
 }
 ```
 

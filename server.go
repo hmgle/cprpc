@@ -11,6 +11,7 @@ package cprpc
 
 import (
 	"bufio"
+	"context"
 	"encoding/gob"
 	"errors"
 	"io"
@@ -18,6 +19,8 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 const (
@@ -45,6 +48,33 @@ type Response struct {
 	next  *Response // for free list in Server
 }
 
+type rpcConn struct {
+	numActiveReq int32
+	rwc          io.ReadWriteCloser
+}
+
+func newRpcConn(c io.ReadWriteCloser) *rpcConn {
+	return &rpcConn{
+		rwc: c,
+	}
+}
+
+func (rc *rpcConn) incrNumReq() {
+	atomic.AddInt32(&rc.numActiveReq, 1)
+}
+
+func (rc *rpcConn) decrNumReq() {
+	atomic.AddInt32(&rc.numActiveReq, -1)
+}
+
+func (rc *rpcConn) numReq() int32 {
+	return atomic.LoadInt32(&rc.numActiveReq)
+}
+
+// ErrServerClosed is returned by the Server's Serve method
+// after a call to Shutdown or Close.
+var ErrServerClosed = errors.New("cprpc: Server closed")
+
 // Server represents an RPC Server.
 type Server struct {
 	reqLock  sync.Mutex // protects freeReq
@@ -52,6 +82,11 @@ type Server struct {
 	respLock sync.Mutex // protects freeResp
 	freeResp *Response
 	apis     map[string]API
+
+	mu         sync.Mutex
+	listeners  map[net.Listener]struct{}
+	activeConn map[*rpcConn]struct{}
+	inShutdown int32 // accessed atomically (non-zero means we're in Shutdown)
 }
 
 // NewServer returns a new Server.
@@ -155,6 +190,10 @@ func (c *gobServerCodec) Close() error {
 	return c.rwc.Close()
 }
 
+func (c *gobServerCodec) GetRwc() io.ReadWriteCloser {
+	return c.rwc
+}
+
 // ServeConn runs the server on a single connection.
 // ServeConn blocks, serving the connection until the client hangs up.
 // The caller typically invokes ServeConn in a go statement.
@@ -175,10 +214,13 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 // ServeCodec is like ServeConn but uses the specified codec to
 // decode requests and encode responses.
 func (server *Server) ServeCodec(codec ServerCodec) {
+	rc := newRpcConn(codec.GetRwc())
+	server.trackConn(rc, true)
+
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 	for {
-		api, req, keepReading, err := server.readRequest(codec)
+		api, req, keepReading, err := server.readRequest(codec, rc)
 		if err != nil {
 			if !keepReading {
 				break
@@ -188,6 +230,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 				server.sendResponse(sending, req, invalidRequest, codec, err.Error())
 				server.freeRequest(req)
 			}
+			rc.decrNumReq()
 			continue
 		}
 		wg.Add(1)
@@ -199,6 +242,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 				codec:   codec,
 				sending: sending,
 			})
+			rc.decrNumReq()
 			wg.Done()
 		}()
 	}
@@ -206,14 +250,19 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 	// Wait for responses to be sent before closing codec.
 	wg.Wait()
 	codec.Close()
+	server.trackConn(rc, false)
 }
 
 // ServeRequest is like ServeCodec but synchronously serves a single request.
 // It does not close the codec upon completion.
 func (server *Server) ServeRequest(codec ServerCodec) error {
+	rc := newRpcConn(codec.GetRwc())
+	server.trackConn(rc, true)
+
 	sending := new(sync.Mutex)
-	api, req, keepReading, err := server.readRequest(codec)
+	api, req, keepReading, err := server.readRequest(codec, rc)
 	if err != nil {
+		defer rc.decrNumReq()
 		if !keepReading {
 			return err
 		}
@@ -231,6 +280,7 @@ func (server *Server) ServeRequest(codec ServerCodec) error {
 		codec:   codec,
 		sending: sending,
 	})
+	rc.decrNumReq()
 	return nil
 }
 
@@ -274,8 +324,9 @@ func (server *Server) freeResponse(resp *Response) {
 	server.respLock.Unlock()
 }
 
-func (server *Server) readRequest(codec ServerCodec) (api API, req *Request, keepReading bool, err error) {
+func (server *Server) readRequest(codec ServerCodec, rc *rpcConn) (api API, req *Request, keepReading bool, err error) {
 	api, req, keepReading, err = server.readRequestHeader(codec)
+	rc.incrNumReq()
 	if err != nil {
 		if !keepReading {
 			return
@@ -315,19 +366,138 @@ func (server *Server) readRequestHeader(codec ServerCodec) (api API, req *Reques
 	return
 }
 
-// Accept accepts connections on the listener and serves requests
+// Serve accepts connections on the listener and serves requests
 // for each incoming connection. Accept blocks until the listener
 // returns a non-nil error. The caller typically invokes Accept in a
 // go statement.
-func (server *Server) Accept(lis net.Listener) {
+func (server *Server) Serve(lis net.Listener) error {
+	defer lis.Close()
+	if !server.trackListener(lis, true) {
+		return ErrServerClosed
+	}
+	defer server.trackListener(lis, false)
+
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
-			log.Print("rpc.Serve: accept:", err.Error())
-			return
+			if server.shuttingDown() {
+				atomic.StoreInt32(&server.inShutdown, 0)
+				return ErrServerClosed
+			}
+			return err
 		}
 		go server.ServeConn(conn)
 	}
+}
+
+// shutdownPollInterval is how often we poll for quiescence
+// during Server.Shutdown. This is lower during tests, to
+// speed up tests.
+var shutdownPollInterval = 500 * time.Millisecond
+
+// Shutdown gracefully shuts down the server without interrupting any
+// active connections. Shutdown works by first closing all open
+// listeners, then closing all idle connections, and then waiting
+// indefinitely for connections to return to idle and then shut down.
+// If the provided context expires before the shutdown is complete,
+// Shutdown returns the context's error, otherwise it returns any
+// error returned from closing the Server's underlying Listener(s).
+func (server *Server) Shutdown(ctx context.Context) error {
+	atomic.StoreInt32(&server.inShutdown, 1)
+
+	server.mu.Lock()
+	lnerr := server.closeListenersLocked()
+	server.mu.Unlock()
+
+	ticker := time.NewTicker(shutdownPollInterval)
+	defer ticker.Stop()
+	for {
+		if server.closeIdleConns() {
+			return lnerr
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// Close immediately closes all active net.Listeners and any
+// connections in state StateNew, StateActive, or StateIdle. For a
+// graceful shutdown, use Shutdown.
+func (server *Server) Close() error {
+	atomic.StoreInt32(&server.inShutdown, 1)
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	err := server.closeListenersLocked()
+	for rc := range server.activeConn {
+		rc.rwc.Close()
+		delete(server.activeConn, rc)
+	}
+	return err
+}
+
+func (s *Server) closeListenersLocked() error {
+	var err error
+	for ln := range s.listeners {
+		if cerr := ln.Close(); err != nil {
+			err = cerr
+		}
+		delete(s.listeners, ln)
+	}
+	return err
+}
+
+func (s *Server) trackConn(rc *rpcConn, add bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeConn == nil {
+		s.activeConn = make(map[*rpcConn]struct{})
+	}
+	if add {
+		s.activeConn[rc] = struct{}{}
+	} else {
+		delete(s.activeConn, rc)
+	}
+}
+
+func (s *Server) shuttingDown() bool {
+	return atomic.LoadInt32(&s.inShutdown) != 0
+}
+
+func (s *Server) trackListener(lis net.Listener, add bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.listeners == nil {
+		s.listeners = make(map[net.Listener]struct{})
+	}
+	if add {
+		if s.shuttingDown() {
+			return false
+		}
+		s.listeners[lis] = struct{}{}
+	} else {
+		delete(s.listeners, lis)
+	}
+	return true
+}
+
+// closeIdleConns closes all idle connections and reports whether the
+// server is quiescent.
+func (s *Server) closeIdleConns() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	quiescent := true
+	for rc := range s.activeConn {
+		if rc.numReq() == 0 {
+			rc.rwc.Close()
+			s.trackConn(rc, false)
+		} else {
+			quiescent = false
+		}
+	}
+	return quiescent
 }
 
 // A ServerCodec implements reading of RPC requests and writing of
@@ -345,6 +515,8 @@ type ServerCodec interface {
 
 	// Close can be called multiple times and must be idempotent.
 	Close() error
+
+	GetRwc() io.ReadWriteCloser
 }
 
 // ServeConn runs the DefaultServer on a single connection.
@@ -369,10 +541,12 @@ func ServeRequest(codec ServerCodec) error {
 	return DefaultServer.ServeRequest(codec)
 }
 
-// Accept accepts connections on the listener and serves requests
+// Serve accepts connections on the listener and serves requests
 // to DefaultServer for each incoming connection.
 // Accept blocks; the caller typically invokes it in a go statement.
-func Accept(lis net.Listener) { DefaultServer.Accept(lis) }
+func Serve(lis net.Listener) error {
+	return DefaultServer.Serve(lis)
+}
 
 // Can connect to RPC service using HTTP CONNECT to rpcPath.
 var connected = "200 Connected to Go RPC"
@@ -406,4 +580,15 @@ func (server *Server) HandleHTTP(rpcPath, debugPath string) {
 // It is still necessary to invoke http.Serve(), typically in a go statement.
 func HandleHTTP() {
 	DefaultServer.HandleHTTP(DefaultRPCPath, DefaultDebugPath)
+}
+
+// Shutdown gracefully shuts down the DefaultServer without interrupting any
+// active connection. Shutdown works by first closing all DefaultServer's
+// open listeners, then waiting indefinitely for connections to transition to
+// an idle state before closing them and shutting down. If the provided context
+// expires before the shutdown is complete, Shutdown forcibly closes active
+// connections and returns the context's error, otherwise it returns any error
+// returned from closing the DefaultServer's underlying Listener(s).
+func Shutdown(ctx context.Context) error {
+	return DefaultServer.Shutdown(ctx)
 }
