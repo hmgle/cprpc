@@ -9,5 +9,5 @@ import (
 // returns a non-nil error. The caller typically invokes Accept in a
 // go statement.
 func (server *Server) Serve(lis net.Listener) error {
-	server.serve(lis)
+	return server.serve(lis)
 }
