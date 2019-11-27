@@ -18,6 +18,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -359,8 +360,13 @@ func (server *Server) readRequestHeader(codec ServerCodec) (api API, req *Reques
 	// we can still recover and move on to the next request.
 	keepReading = true
 
-	api, ok := server.apis[req.Path]
-	if !ok {
+	if originAPI, ok := server.apis[req.Path]; ok {
+		if reflect.TypeOf(originAPI).Kind() == reflect.Ptr {
+			api = reflect.New(reflect.ValueOf(originAPI).Elem().Type()).Interface().(API)
+		} else {
+			api = reflect.New(reflect.TypeOf(originAPI)).Elem().Interface().(API)
+		}
+	} else {
 		err = errors.New("rpc: can't find path " + req.Path)
 	}
 	return
