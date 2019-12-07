@@ -3,6 +3,7 @@ package cprpc_test
 import (
 	"log"
 	"net"
+	"net/rpc"
 	"testing"
 	"time"
 
@@ -84,6 +85,52 @@ func BenchmarkCprpcPool(b *testing.B) {
 	reply := &HelloV1Ret{}
 	for i := 0; i < b.N; i++ {
 		err = clientPool.Call("/v1/hello", &args, reply)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	b.StopTimer()
+}
+
+type (
+	HelloSvr  int
+	HelloArgs struct {
+		Name string
+	}
+	HelloRet struct {
+		Data string
+	}
+)
+
+func (h *HelloSvr) Hello(args *HelloArgs, reply *HelloRet) error {
+	reply.Data = "hello, " + args.Name
+	return nil
+}
+
+func BenchmarkNetRpc(b *testing.B) {
+	b.StopTimer()
+	srv := new(HelloSvr)
+	rpc.Register(srv)
+
+	l, err := net.Listen("tcp4", "")
+	if err != nil {
+		log.Fatal(err)
+	}
+	go rpc.Accept(l)
+
+	client, err := rpc.Dial("tcp", l.Addr().String())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	args := &HelloArgs{
+		Name: "world",
+	}
+	reply := new(HelloRet)
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		err = client.Call("HelloSvr.Hello", args, reply)
 		if err != nil {
 			log.Fatal(err)
 		}

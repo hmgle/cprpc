@@ -2,6 +2,8 @@
 
 `cprpc` is a RPC package that copied and modified from the standard package of `net/rpc`, provides an easier way to use:
 
+## Usage
+
 Server:
 
 ```go
@@ -67,4 +69,20 @@ func main() {
 	}
 	log.Printf("reply: %+v\n", reply)
 }
+```
+
+## Performance
+
+Below are benchmark results comparing cprpc performance to net/rpc:
+
+```
+$ go test -bench=. -benchmem -run=none
+goos: linux
+goarch: amd64
+pkg: github.com/hmgle/cprpc
+BenchmarkCprpc-4           22297             48497 ns/op             328 B/op         11 allocs/op
+BenchmarkCprpcPool-4       17161             71506 ns/op            1081 B/op         22 allocs/op
+BenchmarkNetRpc-4          24211             49597 ns/op             366 B/op         12 allocs/op
+PASS
+ok      github.com/hmgle/cprpc  5.326s
 ```
