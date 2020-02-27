@@ -57,7 +57,7 @@ func forkChild() (*os.Process, error) {
 	}
 	execDir := filepath.Dir(execName)
 	// Spawn child process.
-	p, err := os.StartProcess(execName, []string{execName}, &os.ProcAttr{
+	p, err := os.StartProcess(execName, os.Args, &os.ProcAttr{
 		Dir: execDir,
 		Sys: &syscall.SysProcAttr{},
 	})
