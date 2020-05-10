@@ -230,6 +230,7 @@ func (c *RPCPool) Call(path string, args interface{}, reply interface{}) error {
 	switch err {
 	case ErrShutdown:
 		for i := 0; i <= len(c.conns)+1 && err == ErrShutdown; i++ {
+			client.Close()
 			var errGet error
 			client, errGet = c.get()
 			if errGet != nil {
