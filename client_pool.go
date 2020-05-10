@@ -226,6 +226,19 @@ func (c *RPCPool) Call(path string, args interface{}, reply interface{}) error {
 	if err != nil {
 		return err
 	}
-	defer c.put(client)
-	return client.Call(path, args, reply)
+	err = client.Call(path, args, reply)
+	switch err {
+	case ErrShutdown:
+		for i := 0; i <= len(c.conns)+1 && err == ErrShutdown; i++ {
+			client, _ = c.get()
+			err = client.Call(path, args, reply)
+			if err == nil {
+				break
+			}
+		}
+	}
+	if err == nil {
+		c.put(client)
+	}
+	return err
 }
