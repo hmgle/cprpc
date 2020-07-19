@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	// Defaults used by HandleHTTP
-	DefaultRPCPath   = "/_goRPC_"
+	// DefaultRPCPath used by HandleHTTP
+	DefaultRPCPath = "/_goRPC_"
+	// DefaultDebugPath used by HandleHTTP
 	DefaultDebugPath = "/debug/rpc"
 )
 
@@ -54,7 +55,7 @@ type rpcConn struct {
 	rwc          io.ReadWriteCloser
 }
 
-func newRpcConn(c io.ReadWriteCloser) *rpcConn {
+func newRPCConn(c io.ReadWriteCloser) *rpcConn {
 	return &rpcConn{
 		rwc: c,
 	}
@@ -100,6 +101,7 @@ func NewServer() *Server {
 // DefaultServer is the default instance of *Server.
 var DefaultServer = NewServer()
 
+// Context including Server, seq, ServerCodec and sync.Mutex.
 type Context struct {
 	conn    *Server
 	seq     uint64
@@ -108,10 +110,12 @@ type Context struct {
 	sending *sync.Mutex
 }
 
+// A API implements the Serve method.
 type API interface {
 	Serve(*Context)
 }
 
+// RegisterAPI bind the path to api.
 func (server *Server) RegisterAPI(path string, api API) {
 	server.apis[path] = api
 }
@@ -139,6 +143,7 @@ func (server *Server) sendResponse(sending *sync.Mutex, req *Request, reply inte
 	server.freeResponse(resp)
 }
 
+// ReplyOk reply ok data.
 func (ctx *Context) ReplyOk(ret interface{}) {
 	ctx.conn.sendResponse(ctx.sending, ctx.req, ret, ctx.codec, "")
 	ctx.conn.freeRequest(ctx.req)
@@ -215,7 +220,7 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 // ServeCodec is like ServeConn but uses the specified codec to
 // decode requests and encode responses.
 func (server *Server) ServeCodec(codec ServerCodec) {
-	rc := newRpcConn(codec.GetRwc())
+	rc := newRPCConn(codec.GetRwc())
 	server.trackConn(rc, true)
 
 	sending := new(sync.Mutex)
@@ -257,7 +262,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 // ServeRequest is like ServeCodec but synchronously serves a single request.
 // It does not close the codec upon completion.
 func (server *Server) ServeRequest(codec ServerCodec) error {
-	rc := newRpcConn(codec.GetRwc())
+	rc := newRPCConn(codec.GetRwc())
 	server.trackConn(rc, true)
 
 	sending := new(sync.Mutex)
@@ -440,72 +445,72 @@ func (server *Server) Close() error {
 	return err
 }
 
-func (s *Server) closeListenersLocked() error {
+func (server *Server) closeListenersLocked() error {
 	var err error
-	for ln := range s.listeners {
+	for ln := range server.listeners {
 		if cerr := ln.Close(); err != nil {
 			err = cerr
 		}
-		delete(s.listeners, ln)
+		delete(server.listeners, ln)
 	}
 	return err
 }
 
-func (s *Server) trackConnUnlock(rc *rpcConn, add bool) {
-	if s.activeConn == nil {
-		s.activeConn = make(map[*rpcConn]struct{})
+func (server *Server) trackConnUnlock(rc *rpcConn, add bool) {
+	if server.activeConn == nil {
+		server.activeConn = make(map[*rpcConn]struct{})
 	}
 	if add {
-		s.activeConn[rc] = struct{}{}
+		server.activeConn[rc] = struct{}{}
 	} else {
-		delete(s.activeConn, rc)
+		delete(server.activeConn, rc)
 	}
 }
 
-func (s *Server) trackConn(rc *rpcConn, add bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.activeConn == nil {
-		s.activeConn = make(map[*rpcConn]struct{})
+func (server *Server) trackConn(rc *rpcConn, add bool) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.activeConn == nil {
+		server.activeConn = make(map[*rpcConn]struct{})
 	}
 	if add {
-		s.activeConn[rc] = struct{}{}
+		server.activeConn[rc] = struct{}{}
 	} else {
-		delete(s.activeConn, rc)
+		delete(server.activeConn, rc)
 	}
 }
 
-func (s *Server) shuttingDown() bool {
-	return atomic.LoadInt32(&s.inShutdown) != 0
+func (server *Server) shuttingDown() bool {
+	return atomic.LoadInt32(&server.inShutdown) != 0
 }
 
-func (s *Server) trackListener(lis net.Listener, add bool) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.listeners == nil {
-		s.listeners = make(map[net.Listener]struct{})
+func (server *Server) trackListener(lis net.Listener, add bool) bool {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.listeners == nil {
+		server.listeners = make(map[net.Listener]struct{})
 	}
 	if add {
-		if s.shuttingDown() {
+		if server.shuttingDown() {
 			return false
 		}
-		s.listeners[lis] = struct{}{}
+		server.listeners[lis] = struct{}{}
 	} else {
-		delete(s.listeners, lis)
+		delete(server.listeners, lis)
 	}
 	return true
 }
 
 // closeIdleConns closes all idle connections and reports whether the
 // server is quiescent.
-func (s *Server) closeIdleConns() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (server *Server) closeIdleConns() bool {
+	server.mu.Lock()
+	defer server.mu.Unlock()
 	quiescent := true
-	for rc := range s.activeConn {
+	for rc := range server.activeConn {
 		if rc.numReq() == 0 {
 			rc.rwc.Close()
-			s.trackConnUnlock(rc, false)
+			server.trackConnUnlock(rc, false)
 		} else {
 			quiescent = false
 		}
