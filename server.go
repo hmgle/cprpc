@@ -241,6 +241,11 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 		}
 		wg.Add(1)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("bad recover: %v", r)
+				}
+			}()
 			api.Serve(&Context{
 				conn:    server,
 				seq:     req.Seq,
@@ -393,7 +398,14 @@ func (server *Server) serve(lis net.Listener) error {
 			}
 			return err
 		}
-		go server.ServeConn(conn)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("bad recover: %v", r)
+				}
+			}()
+			server.ServeConn(conn)
+		}()
 	}
 }
 
