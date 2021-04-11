@@ -180,13 +180,19 @@ func NewRPCPool(o *Options) (*RPCPool, error) {
 			}
 
 			encBuf := bufio.NewWriter(conn)
-			p := NewClientWithCodec(&Codec{
-				Closer:  conn,
-				Decoder: gob.NewDecoder(conn),
-				Encoder: gob.NewEncoder(encBuf),
-				EncBuf:  encBuf,
-				Timeout: o.WriteTimeout,
-			})
+			var codec ClientCodec
+			if o.CodecFunc != nil {
+				codec = o.CodecFunc(conn)
+			} else {
+				codec = &Codec{
+					Closer:  conn,
+					Decoder: gob.NewDecoder(conn),
+					Encoder: gob.NewEncoder(encBuf),
+					EncBuf:  encBuf,
+					Timeout: o.WriteTimeout,
+				}
+			}
+			p := NewClientWithCodec(codec)
 
 			return p, err
 		},
