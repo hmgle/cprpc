@@ -8,6 +8,7 @@ package cprpc
 
 import (
 	"errors"
+	"io"
 	"math/rand"
 	"sync"
 	"time"
@@ -42,6 +43,8 @@ type Options struct {
 	IdleTimeout  time.Duration
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+
+	CodecFunc func(io.ReadWriteCloser) ClientCodec
 }
 
 // Input is the input channel.

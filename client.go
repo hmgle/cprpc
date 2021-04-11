@@ -190,9 +190,14 @@ func (call *Call) done() {
 // so no interlocking is required. However each half may be accessed
 // concurrently so the implementation of conn should protect against
 // concurrent reads or concurrent writes.
-func NewClient(conn io.ReadWriteCloser) *Client {
+func NewClient(conn io.ReadWriteCloser, codecFunc ...func(io.ReadWriteCloser) ClientCodec) *Client {
 	encBuf := bufio.NewWriter(conn)
-	client := &gobClientCodec{conn, gob.NewDecoder(conn), gob.NewEncoder(encBuf), encBuf}
+	var client ClientCodec
+	if len(codecFunc) > 0 && codecFunc[0] != nil {
+		client = codecFunc[0](conn)
+	} else {
+		client = &gobClientCodec{conn, gob.NewDecoder(conn), gob.NewEncoder(encBuf), encBuf}
+	}
 	return NewClientWithCodec(client)
 }
 
@@ -244,7 +249,7 @@ func DialHTTP(network, address string) (*Client, error) {
 
 // DialHTTPPath connects to an HTTP RPC server
 // at the specified network address and path.
-func DialHTTPPath(network, address, path string) (*Client, error) {
+func DialHTTPPath(network, address, path string, codecFunc ...func(io.ReadWriteCloser) ClientCodec) (*Client, error) {
 	var err error
 	conn, err := net.Dial(network, address)
 	if err != nil {
@@ -256,7 +261,7 @@ func DialHTTPPath(network, address, path string) (*Client, error) {
 	// before switching to RPC protocol.
 	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
 	if err == nil && resp.Status == connected {
-		return NewClient(conn), nil
+		return NewClient(conn, codecFunc...), nil
 	}
 	if err == nil {
 		err = errors.New("unexpected HTTP response: " + resp.Status)
@@ -271,12 +276,12 @@ func DialHTTPPath(network, address, path string) (*Client, error) {
 }
 
 // Dial connects to an RPC server at the specified network address.
-func Dial(network, address string) (*Client, error) {
+func Dial(network, address string, codecFunc ...func(io.ReadWriteCloser) ClientCodec) (*Client, error) {
 	conn, err := net.Dial(network, address)
 	if err != nil {
 		return nil, err
 	}
-	return NewClient(conn), nil
+	return NewClient(conn, codecFunc...), nil
 }
 
 // Close calls the underlying codec's Close method. If the connection is already

@@ -89,13 +89,19 @@ type Server struct {
 	listeners  map[net.Listener]struct{}
 	activeConn map[*rpcConn]struct{}
 	inShutdown int32 // accessed atomically (non-zero means we're in Shutdown)
+
+	codecFunc func(io.ReadWriteCloser) ServerCodec
 }
 
 // NewServer returns a new Server.
-func NewServer() *Server {
-	return &Server{
+func NewServer(codecFunc ...func(io.ReadWriteCloser) ServerCodec) *Server {
+	server := &Server{
 		apis: make(map[string]API),
 	}
+	if len(codecFunc) > 0 {
+		server.codecFunc = codecFunc[0]
+	}
+	return server
 }
 
 // DefaultServer is the default instance of *Server.
@@ -208,11 +214,16 @@ func (c *gobServerCodec) GetRwc() io.ReadWriteCloser {
 // See NewClient's comment for information about concurrent access.
 func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 	buf := bufio.NewWriter(conn)
-	srv := &gobServerCodec{
-		rwc:    conn,
-		dec:    gob.NewDecoder(conn),
-		enc:    gob.NewEncoder(buf),
-		encBuf: buf,
+	var srv ServerCodec
+	if server.codecFunc == nil {
+		srv = &gobServerCodec{
+			rwc:    conn,
+			dec:    gob.NewDecoder(conn),
+			enc:    gob.NewEncoder(buf),
+			encBuf: buf,
+		}
+	} else {
+		srv = server.codecFunc(conn)
 	}
 	server.ServeCodec(srv)
 }
