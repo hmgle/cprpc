@@ -80,9 +80,14 @@ $ go test -bench=. -benchmem -run=none
 goos: linux
 goarch: amd64
 pkg: github.com/hmgle/cprpc
-BenchmarkCprpc-4           22297             48497 ns/op             328 B/op         11 allocs/op
-BenchmarkCprpcPool-4       17161             71506 ns/op            1081 B/op         22 allocs/op
-BenchmarkNetRpc-4          24211             49597 ns/op             366 B/op         12 allocs/op
+cpu: Intel(R) Core(TM) i5-5200U CPU @ 2.20GHz
+BenchmarkCprpc-4                   23352             51321 ns/op             328 B/op         11 allocs/op
+BenchmarkCprpcJSON-4               17560             64298 ns/op             336 B/op         13 allocs/op
+BenchmarkCprpcMsgpack-4            13821             83964 ns/op             328 B/op         11 allocs/op
+BenchmarkCprpcPool-4               15102             74708 ns/op            1070 B/op         22 allocs/op
+BenchmarkCprpcPoolJSON-4           19048             62061 ns/op             368 B/op         13 allocs/op
+BenchmarkCprpcPoolMsgpack-4        12912             86324 ns/op             360 B/op         12 allocs/op
+BenchmarkNetRpc-4                  18945             62589 ns/op             358 B/op         12 allocs/op
 PASS
-ok      github.com/hmgle/cprpc  5.326s
+ok      github.com/hmgle/cprpc  13.357s
 ```
