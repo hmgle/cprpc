@@ -256,6 +256,8 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 				if r := recover(); r != nil {
 					log.Printf("bad recover: %v", r)
 				}
+				rc.decrNumReq()
+				wg.Done()
 			}()
 			api.Serve(&Context{
 				conn:    server,
@@ -264,8 +266,6 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 				codec:   codec,
 				sending: sending,
 			})
-			rc.decrNumReq()
-			wg.Done()
 		}()
 	}
 	// We've seen that there are no more requests.
