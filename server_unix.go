@@ -1,3 +1,4 @@
+//go:build !windows
 // +build !windows
 
 package cprpc
@@ -20,10 +21,10 @@ var allProcFiles = []*os.File{os.Stdin, os.Stdout, os.Stderr}
 // arguments as when it was originally started. This allows for a newly
 // deployed binary to be started. It returns the pid of the newly started
 // process when successful.
-func startProcess() (int, error) {
+func startProcess() (*os.Process, error) {
 	execName, err := os.Executable()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	execDir := filepath.Dir(execName)
 
@@ -35,7 +36,7 @@ func startProcess() (int, error) {
 	// the file it points to has been changed we will use the updated symlink.
 	argv0, err := exec.LookPath(os.Args[0])
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	process, err := os.StartProcess(argv0, os.Args, &os.ProcAttr{
@@ -45,27 +46,9 @@ func startProcess() (int, error) {
 		Sys:   &syscall.SysProcAttr{},
 	})
 	if err != nil {
-		return 0, err
-	}
-	return process.Pid, nil
-}
-
-func forkChild() (*os.Process, error) {
-	execName, err := os.Executable()
-	if err != nil {
 		return nil, err
 	}
-	execDir := filepath.Dir(execName)
-	// Spawn child process.
-	p, err := os.StartProcess(execName, os.Args, &os.ProcAttr{
-		Dir: execDir,
-		Sys: &syscall.SysProcAttr{},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return p, nil
+	return process, nil
 }
 
 // Serve accepts connections on the listener and serves requests
@@ -83,7 +66,7 @@ func (server *Server) Serve(lis net.Listener) error {
 		case syscall.SIGINT, syscall.SIGTERM:
 			return server.Shutdown(context.Background())
 		case syscall.SIGHUP, syscall.SIGUSR2:
-			p, err := forkChild()
+			p, err := startProcess()
 			if err != nil {
 				log.Printf("unable to fork child: %v.\n", err)
 				continue
