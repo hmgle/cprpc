@@ -64,6 +64,21 @@ func (c *RPCPool) get() (*Client, error) {
 	}
 }
 
+func (c *RPCPool) tryGet() (client *Client, err error) {
+	tryCnt := 5
+	for i := 0; i < tryCnt; i++ {
+		client, err = c.get()
+		if err == nil {
+			return
+		}
+		if i == tryCnt-1 {
+			break
+		}
+		time.Sleep(time.Millisecond*10 + time.Second*time.Duration(i))
+	}
+	return
+}
+
 // put back to pool.
 func (c *RPCPool) put(conn *Client) error {
 	if conn == nil {
@@ -218,7 +233,7 @@ func NewRPCPool(o *Options) (*RPCPool, error) {
 
 // Go invokes the function asynchronously.
 func (c *RPCPool) Go(path string, args interface{}, reply interface{}, done chan *Call) (*Call, error) {
-	client, err := c.get()
+	client, err := c.tryGet()
 	if err != nil {
 		return nil, err
 	}
@@ -228,17 +243,17 @@ func (c *RPCPool) Go(path string, args interface{}, reply interface{}, done chan
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
 func (c *RPCPool) Call(path string, args interface{}, reply interface{}) error {
-	client, err := c.get()
+	client, err := c.tryGet()
 	if err != nil {
 		return err
 	}
 	err = client.Call(path, args, reply)
-	switch err {
-	case ErrShutdown:
-		for i := 0; i <= len(c.conns)+1 && err == ErrShutdown; i++ {
+	if err != nil {
+		tryCnt := len(c.conns) + 3
+		for i := 0; i <= tryCnt; i++ {
 			client.Close()
 			var errGet error
-			client, errGet = c.get()
+			client, errGet = c.tryGet()
 			if errGet != nil {
 				err = errGet
 				break
@@ -246,6 +261,9 @@ func (c *RPCPool) Call(path string, args interface{}, reply interface{}) error {
 			err = client.Call(path, args, reply)
 			if err == nil {
 				break
+			}
+			if i > len(c.conns) {
+				time.Sleep(time.Millisecond*10 + time.Second*time.Duration(i-len(c.conns)))
 			}
 		}
 	}
